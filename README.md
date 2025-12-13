@@ -12,7 +12,9 @@ Strange Weather generates continuously evolving control voltages using mathemati
 - **4 Attractor Types** — Lorenz, Rossler, Thomas, Halvorsen
 - **16 CV Outputs** — 4 per bank + 4 combined
 - **Real-time Visualization** — Watch the attractors evolve
+- **3 Display Modes** — Trace (lines), Lissajous (phosphor dots), Scope (waveforms)
 - **3D Display Mode** — See the full three-dimensional structure with rotation
+- **Adjustable Trail Length** — Control how much history is displayed
 - **Extreme Rate Range** — From 20-minute cycles to sub-second modulation
 
 ## Installation
@@ -37,7 +39,7 @@ Strange Weather generates continuously evolving control voltages using mathemati
 Requires [VCV Rack SDK](https://vcvrack.com/manual/Building#Building-Rack-plugins) v2.x.
 
 ```bash
-git clone https://github.com/yourusername/strange-weather.git
+git clone https://github.com/kvarnelis/strange-weather.git
 cd strange-weather
 make RACK_DIR=/path/to/Rack-SDK
 ```
@@ -77,7 +79,9 @@ cp -r res ~/Library/Application\ Support/Rack2/plugins-mac-arm64/StrangeWeather/
 
 ### Display Controls
 - **CYCLE** — Cycles through views: A, B, C, Combined, All
+- **MODE** — Cycles display style: Trace (lines), Lissajous (tiny dots), Scope (time-based waveforms)
 - **3D** — Toggles 3D rotation view
+- **TRAIL** — Adjusts trail length from ~1 second to ~34 seconds of history
 
 ## Attractor Types
 
