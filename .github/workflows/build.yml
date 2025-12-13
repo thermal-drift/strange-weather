@@ -1,0 +1,79 @@
+name: Build VCV Rack Plugin
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  rack-sdk-version: 2.6.1
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-latest
+            rack-os: lin
+            rack-arch: x64
+          - platform: macos-x64
+            os: macos-latest
+            rack-os: mac
+            rack-arch: x64
+          - platform: macos-arm64
+            os: macos-latest
+            rack-os: mac
+            rack-arch: arm64
+          - platform: windows-x64
+            os: windows-latest
+            rack-os: win
+            rack-arch: x64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Get Rack SDK
+        run: |
+          pushd $HOME
+          curl -o Rack-SDK.zip https://vcvrack.com/downloads/Rack-SDK-${{ env.rack-sdk-version }}-${{ matrix.rack-os }}-${{ matrix.rack-arch }}.zip
+          unzip Rack-SDK.zip
+          popd
+
+      - name: Build plugin
+        run: |
+          export RACK_DIR=$HOME/Rack-SDK
+          make -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2) dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StrangeWeather-${{ matrix.platform }}
+          path: dist/*.vcvplugin
+
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*.vcvplugin
+          draft: true
