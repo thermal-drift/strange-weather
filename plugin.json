@@ -11,7 +11,7 @@
   "manualUrl": "https://github.com/thermal-drift/strange-weather/blob/main/README.md",
   "sourceUrl": "https://github.com/thermal-drift/strange-weather",
   "donateUrl": "",
-  "changelogUrl": "",
+  "changelogUrl": "https://github.com/thermal-drift/strange-weather/releases",
   "modules": [
     {
       "slug": "StrangeWeather",
