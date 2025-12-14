@@ -6,11 +6,11 @@
   "brand": "Thermal Drift",
   "author": "Thermal Drift",
   "authorEmail": "",
-  "authorUrl": "",
+  "authorUrl": "https://github.com/thermal-drift",
   "pluginUrl": "https://github.com/thermal-drift/strange-weather",
   "manualUrl": "https://github.com/thermal-drift/strange-weather/blob/main/README.md",
   "sourceUrl": "https://github.com/thermal-drift/strange-weather",
-  "donateUrl": "",
+  "donateUrl": "https://www.tabbysplace.org/donate/one-time-donation/",
   "changelogUrl": "https://github.com/thermal-drift/strange-weather/releases",
   "modules": [
     {
