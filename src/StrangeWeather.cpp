@@ -518,10 +518,10 @@ struct StrangeWeather : Module {
             }
 
             // Get raw normalized outputs (-1 to +1)
-            const float outputGain = 3.0f;  // simple boost to use the full scope range
-            float rawX = clamp(attractors[i].getNormX() / 5.0f * outputGain, -1.f, 1.f);  // getNormX returns ±5V, convert to ±1
-            float rawY = clamp(attractors[i].getNormY() / 5.0f * outputGain, -1.f, 1.f);
-            float rawZ = clamp(attractors[i].getNormZ() / 5.0f * outputGain, -1.f, 1.f);
+            // getNormX returns ±5V, convert to ±1 (clamp for safety, no gain boost)
+            float rawX = clamp(attractors[i].getNormX() / 5.0f, -1.f, 1.f);
+            float rawY = clamp(attractors[i].getNormY() / 5.0f, -1.f, 1.f);
+            float rawZ = clamp(attractors[i].getNormZ() / 5.0f, -1.f, 1.f);
 
             // Apply smoothing
             smoothedX[i] += smoothCoeff * (rawX - smoothedX[i]);
@@ -576,13 +576,23 @@ struct StrangeWeather : Module {
         outputs[COMB_DIST_OUTPUT].setVoltage(combDist);
 
         // Update trail history (downsample for display)
+        // Scale by slowest range: High=60fps, Med=20fps, Low=5fps
+        int minRange = 2;
+        for (int i = 0; i < 4; i++) {
+            int r = (int)params[rangeParams[i]].getValue();
+            if (r < minRange) minRange = r;
+        }
+        float trailFps = (minRange == 0) ? 10.f : (minRange == 1) ? 20.f : 60.f;
+
         trailCounter++;
-        if (trailCounter >= (int)(args.sampleRate / 60.f)) { // ~60 fps
+        if (trailCounter >= (int)(args.sampleRate / trailFps)) {
             trailCounter = 0;
 
             // Wait for smoothing to settle, then fill trail with current position (clear screen)
+            // Scale delay to ~0.5s regardless of fps
             initDelay++;
-            if (initDelay == 30) {  // ~0.5 seconds at 60fps - enough for smoothing to settle
+            int initFrames = std::max(5, (int)(trailFps * 0.5f));
+            if (initDelay == initFrames) {
                 for (int j = 0; j < MAX_TRAIL_LENGTH; j++) {
                     for (int i = 0; i < 4; i++) {
                         trailX[i][j] = displayX[i];
