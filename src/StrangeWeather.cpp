@@ -218,9 +218,10 @@ struct StrangeWeather : Module {
     float smoothedZ[4] = {0.f, 0.f, 0.f, 0.f};
 
     // Display state
-    int displayMode = 5; // 0=A, 1=B, 2=C, 3=D, 4=Combined, 5=All
+    int displayMode = 5; // 0=A, 1=B, 2=C, 3=D, 4=Combined, 5=All, 6=Ajman (if enabled)
     bool display3D = false; // Toggle between 2D and 3D view
     int displayStyle = 0; // 0=Trace, 1=Lissajous (tiny dots), 2=Scope
+    bool ajmanEnabled = false; // Easter egg: enables Ajman mode in cycle
 
     // Trail history for display (ring buffer)
     static const int MAX_TRAIL_LENGTH = 4096;
@@ -297,7 +298,8 @@ struct StrangeWeather : Module {
     }
     
     void cycleDisplay() {
-        displayMode = (displayMode + 1) % 6;
+        int maxModes = ajmanEnabled ? 7 : 6;
+        displayMode = (displayMode + 1) % maxModes;
     }
 
     void cycleDisplayStyle() {
@@ -456,6 +458,7 @@ struct StrangeWeather : Module {
         json_object_set_new(rootJ, "displayMode", json_integer(displayMode));
         json_object_set_new(rootJ, "display3D", json_boolean(display3D));
         json_object_set_new(rootJ, "displayStyle", json_integer(displayStyle));
+        json_object_set_new(rootJ, "ajmanEnabled", json_boolean(ajmanEnabled));
         return rootJ;
     }
 
@@ -472,6 +475,10 @@ struct StrangeWeather : Module {
         if (displayStyleJ) {
             displayStyle = json_integer_value(displayStyleJ);
         }
+        json_t* ajmanEnabledJ = json_object_get(rootJ, "ajmanEnabled");
+        if (ajmanEnabledJ) {
+            ajmanEnabled = json_boolean_value(ajmanEnabledJ);
+        }
     }
 };
 
@@ -480,6 +487,7 @@ struct StrangeWeather : Module {
 struct AttractorDisplay : Widget {
     StrangeWeather* module = nullptr;
     float rotationTime = 0.f;
+    int ajmanImage = -1;  // NanoVG image handle for Ajman
 
     // 3D projection: rotate point and return screen coordinates
     void project3D(float x, float y, float z, float angleX, float angleY, float& screenX, float& screenY, float& depth) {
@@ -519,6 +527,27 @@ struct AttractorDisplay : Widget {
         }
 
         int mode = module->displayMode;
+
+        // Easter egg: Ajman mode (mode 6)
+        if (mode == 6) {
+            // Load image if not loaded yet
+            if (ajmanImage == -1) {
+                std::string path = asset::plugin(pluginInstance, "res/ajman.jpg");
+                ajmanImage = nvgCreateImage(args.vg, path.c_str(), 0);
+            }
+            if (ajmanImage != -1) {
+                // Draw image scaled to fit display with border
+                float border = 4.f;
+                NVGpaint imgPaint = nvgImagePattern(args.vg, border, border,
+                    box.size.x - border * 2, box.size.y - border * 2, 0, ajmanImage, 1.0f);
+                nvgBeginPath(args.vg);
+                nvgRect(args.vg, border, border, box.size.x - border * 2, box.size.y - border * 2);
+                nvgFillPaint(args.vg, imgPaint);
+                nvgFill(args.vg);
+            }
+            nvgRestore(args.vg);
+            return;
+        }
         bool is3D = module->display3D;
 
         // Setup label style
@@ -1098,6 +1127,9 @@ struct StrangeWeatherWidget : ModuleWidget {
         ));
 
         menu->addChild(createBoolPtrMenuItem("3D Rotation", "", &module->display3D));
+
+        menu->addChild(new MenuSeparator());
+        menu->addChild(createBoolPtrMenuItem("Ajman", "", &module->ajmanEnabled));
     }
 };
 
