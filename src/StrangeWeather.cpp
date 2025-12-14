@@ -25,53 +25,145 @@ struct Attractor {
     // Bounding box tracking for normalization
     double minX, maxX, minY, maxY, minZ, maxZ;
 
-    Attractor() {
-        // Initialize with slightly random starting point
-        x = 0.1 + (random::uniform() - 0.5) * 0.1;
-        y = 0.0 + (random::uniform() - 0.5) * 0.1;
-        z = 0.0 + (random::uniform() - 0.5) * 0.1;
-        type = LORENZ;
+        double boundLimit() const {
+            switch (type) {
+                case LORENZ: return 35.0;   // Rossler-like span
+                case ROSSLER: return 35.0;
+                case THOMAS: return 8.0;
+                case HALVORSEN: return 30.0;
+            }
+        return 35.0;
+        }
 
-        // Initial bounds (will adapt)
-        minX = -20.0; maxX = 20.0;
-        minY = -30.0; maxY = 30.0;
-        minZ = 0.0;   maxZ = 50.0;
+    void finalizeBounds() {
+        double lim = boundLimit();
+        auto clampTo = [lim](double& vmin, double& vmax) {
+            vmin = std::max(vmin, -lim);
+            vmax = std::min(vmax, lim);
+            if (vmax - vmin < 1e-3) {
+                vmin -= 1.0;
+                vmax += 1.0;
+            }
+        };
+        clampTo(minX, maxX);
+        clampTo(minY, maxY);
+        clampTo(minZ, maxZ);
+    }
+
+    Attractor() {
+        type = LORENZ;
+        resetState();
+    }
+
+    // Reset state to good initial conditions for current attractor type
+    void resetState() {
+        // Each attractor has different scale/basin - use appropriate initial conditions
+        int warmupSteps = 0;
+        double warmupDt = 0.0;
+        switch (type) {
+            case LORENZ:
+                // Currently running Rossler equations - use same init as ROSSLER
+                x = 0.1 + (random::uniform() - 0.5) * 0.02;
+                y = 0.1 + (random::uniform() - 0.5) * 0.02;
+                z = 0.0 + (random::uniform() - 0.5) * 0.02;
+                minX = maxX = x;
+                minY = maxY = y;
+                minZ = maxZ = z;
+                warmupSteps = 2000; warmupDt = 0.01;
+                break;
+            case ROSSLER:
+                // Rossler orbits around origin; use a tiny asymmetry to avoid the trivial zero orbit
+                x = 0.1 + (random::uniform() - 0.5) * 0.02;
+                y = 0.1 + (random::uniform() - 0.5) * 0.02;
+                z = 0.0 + (random::uniform() - 0.5) * 0.02;
+                minX = maxX = x;
+                minY = maxY = y;
+                minZ = maxZ = z;
+                warmupSteps = 2000; warmupDt = 0.01;
+                break;
+            case THOMAS:
+                // Thomas is bounded roughly [-5, 5], needs asymmetric start to avoid fixed points
+                x = 1.0 + (random::uniform() - 0.5) * 0.5;
+                y = 1.1 + (random::uniform() - 0.5) * 0.5;
+                z = 1.2 + (random::uniform() - 0.5) * 0.5;
+                minX = maxX = x;
+                minY = maxY = y;
+                minZ = maxZ = z;
+                warmupSteps = 1500; warmupDt = 0.01;
+                break;
+            case HALVORSEN:
+                // Halvorsen: seed with some spread so it shows the sculptural folds quickly
+                x = 1.0 + (random::uniform() - 0.5) * 1.0;
+                y = -1.0 + (random::uniform() - 0.5) * 1.0;
+                z = 0.5 + (random::uniform() - 0.5) * 1.0;
+                minX = maxX = x;
+                minY = maxY = y;
+                minZ = maxZ = z;
+                warmupSteps = 3500; warmupDt = 0.02;
+                break;
+        }
+        if (warmupSteps > 0 && warmupDt > 0.0) {
+            warmup(warmupSteps, warmupDt);
+            // Add a tiny perturbation and short settle to avoid periodic lock-in
+            x += (random::uniform() - 0.5) * 0.01;
+            y += (random::uniform() - 0.5) * 0.01;
+            z += (random::uniform() - 0.5) * 0.01;
+            warmup(500, warmupDt);
+            // Keep bounds from warmup but clamp to reasonable span
+            finalizeBounds();
+        }
+    }
+
+    // Set type and reset state if type changed
+    void setType(AttractorType newType) {
+        if (newType != type) {
+            type = newType;
+            resetState();
+        }
+    }
+
+    // Run a short, fixed warmup so the attractor settles into its orbit immediately
+    void warmup(int steps, double dt) {
+        for (int i = 0; i < steps; i++) {
+            step(dt);
+        }
     }
 
     // Compute derivatives for current state (chaos affects primary parameter)
     void derivatives(double& dx, double& dy, double& dz) {
         switch (type) {
             case LORENZ: {
-                // σ = 10, β = 8/3, ρ varies with chaos: 20-30
-                const double sigma = 10.0;
-                const double rho = 20.0 + chaos * 10.0;  // chaos: periodic → chaotic
-                const double beta = 8.0 / 3.0;
-                dx = sigma * (y - x);
-                dy = x * (rho - z) - y;
-                dz = x * y - beta * z;
+                // Rossler (duplicate) parameters for bank A
+                const double a = 0.2;
+                const double b = 0.2;
+                const double c = 5.7 + chaos * 1.3;  // gentle variation
+                dx = -y - z;
+                dy = x + a * y;
+                dz = b + z * (x - c);
                 break;
             }
             case ROSSLER: {
-                // a = 0.2, b = 0.2, c varies with chaos: 4-7
+                // a = 0.2, b = 0.2, c varies in the classic chaotic window ~5.7-7.0
                 const double a = 0.2;
                 const double b = 0.2;
-                const double c = 4.0 + chaos * 3.0;  // chaos: tight spiral → wild
+                // Staying near the canonical c=5.7 avoids runaway excursions that draw as a box
+                const double c = 5.7 + chaos * 1.3;  // chaos: classic → slightly wilder but still bounded
                 dx = -y - z;
                 dy = x + a * y;
                 dz = b + z * (x - c);
                 break;
             }
             case THOMAS: {
-                // b varies with chaos: 0.3-0.15 (inverted - lower = more chaos)
-                const double b = 0.3 - chaos * 0.15;  // chaos: damped → sustained
+                // b must be < 0.208186 for chaos! Range: 0.19 down to 0.1
+                const double b = 0.19 - chaos * 0.09;  // chaos: mild → wild (always chaotic)
                 dx = std::sin(y) - b * x;
                 dy = std::sin(z) - b * y;
                 dz = std::sin(x) - b * z;
                 break;
             }
             case HALVORSEN: {
-                // a varies with chaos: 1.4-2.0
-                const double a = 1.4 + chaos * 0.6;  // chaos: mild → aggressive
+                // a varies with chaos: center near the canonical 1.89
+                const double a = 1.6 + chaos * 0.6;  // chaos: mild → aggressive
                 dx = -a * x - 4.0 * y - 4.0 * z - y * y;
                 dy = -a * y - 4.0 * z - 4.0 * x - z * z;
                 dz = -a * z - 4.0 * x - 4.0 * y - x * x;
@@ -82,6 +174,12 @@ struct Attractor {
     
     // RK4 integration step
     void step(double dt) {
+        // Blow-up guard: if state became non-finite or absurdly large, re-seed to keep the display sane
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
+            std::abs(x) > 1e6 || std::abs(y) > 1e6 || std::abs(z) > 1e6) {
+            resetState();
+        }
+
         double k1x, k1y, k1z;
         double k2x, k2y, k2z;
         double k3x, k3y, k3z;
@@ -115,14 +213,13 @@ struct Attractor {
         y = oy + (dt / 6.0) * (k1y + 2.0 * k2y + 2.0 * k3y + k4y);
         z = oz + (dt / 6.0) * (k1z + 2.0 * k2z + 2.0 * k3z + k4z);
         
-        // Update bounding box with slow decay toward current values
-        const double decay = 0.9999;
-        minX = std::min(minX * decay + x * (1.0 - decay), x);
-        maxX = std::max(maxX * decay + x * (1.0 - decay), x);
-        minY = std::min(minY * decay + y * (1.0 - decay), y);
-        maxY = std::max(maxY * decay + y * (1.0 - decay), y);
-        minZ = std::min(minZ * decay + z * (1.0 - decay), z);
-        maxZ = std::max(maxZ * decay + z * (1.0 - decay), z);
+        // Update bounding box - expand only
+        minX = std::min(minX, x);
+        maxX = std::max(maxX, x);
+        minY = std::min(minY, y);
+        maxY = std::max(maxY, y);
+        minZ = std::min(minZ, z);
+        maxZ = std::max(maxZ, z);
     }
     
     // Get normalized outputs (-5V to +5V)
@@ -169,6 +266,7 @@ struct StrangeWeather : Module {
         CHAOS_C_PARAM,
         CHAOS_D_PARAM,
         TRAIL_PARAM,
+        RESET_PARAM,
         NUM_PARAMS
     };
     
@@ -216,6 +314,10 @@ struct StrangeWeather : Module {
     float smoothedX[4] = {0.f, 0.f, 0.f, 0.f};
     float smoothedY[4] = {0.f, 0.f, 0.f, 0.f};
     float smoothedZ[4] = {0.f, 0.f, 0.f, 0.f};
+    // Raw normalized (for display trails)
+    float displayX[4] = {0.f, 0.f, 0.f, 0.f};
+    float displayY[4] = {0.f, 0.f, 0.f, 0.f};
+    float displayZ[4] = {0.f, 0.f, 0.f, 0.f};
 
     // Display state
     int displayMode = 5; // 0=A, 1=B, 2=C, 3=D, 4=Combined, 5=All, 6=Ajman (if enabled)
@@ -237,6 +339,27 @@ struct StrangeWeather : Module {
 
     // Sample counter for trail updates
     int trailCounter = 0;
+    int initDelay = 0;  // Delay before initializing trails (let smoothing settle)
+
+    dsp::SchmittTrigger resetTrigger;
+
+    void performReset() {
+        for (int i = 0; i < 4; i++) {
+            attractors[i].resetState();
+            smoothedX[i] = smoothedY[i] = smoothedZ[i] = 0.f;
+            for (int j = 0; j < MAX_TRAIL_LENGTH; j++) {
+                trailX[i][j] = 0.f;
+                trailY[i][j] = 0.f;
+                trailZ[i][j] = 0.f;
+            }
+        }
+        for (int j = 0; j < MAX_TRAIL_LENGTH; j++) {
+            combTrailX[j] = combTrailY[j] = combTrailZ[j] = 0.f;
+        }
+        trailIndex = 0;
+        trailCounter = 0;
+        initDelay = 0;
+    }
     
     StrangeWeather() {
         config(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS);
@@ -248,16 +371,16 @@ struct StrangeWeather : Module {
         configParam(RATE_D_PARAM, 0.f, 1.f, 0.5f, "Rate D");
 
         // Range switches (0=Low, 1=Med, 2=High)
-        configSwitch(RANGE_A_PARAM, 0.f, 2.f, 1.f, "Range A", {"Low (5-20 min)", "Med (1s-2min)", "High (0.1-10s)"});
-        configSwitch(RANGE_B_PARAM, 0.f, 2.f, 1.f, "Range B", {"Low (5-20 min)", "Med (1s-2min)", "High (0.1-10s)"});
-        configSwitch(RANGE_C_PARAM, 0.f, 2.f, 1.f, "Range C", {"Low (5-20 min)", "Med (1s-2min)", "High (0.1-10s)"});
-        configSwitch(RANGE_D_PARAM, 0.f, 2.f, 1.f, "Range D", {"Low (5-20 min)", "Med (1s-2min)", "High (0.1-10s)"});
+        configSwitch(RANGE_A_PARAM, 0.f, 2.f, 2.f, "Range A", {"Low (5-20 min)", "Med (1s-2min)", "High (0.1-10s)"});
+        configSwitch(RANGE_B_PARAM, 0.f, 2.f, 2.f, "Range B", {"Low (5-20 min)", "Med (1s-2min)", "High (0.1-10s)"});
+        configSwitch(RANGE_C_PARAM, 0.f, 2.f, 2.f, "Range C", {"Low (5-20 min)", "Med (1s-2min)", "High (0.1-10s)"});
+        configSwitch(RANGE_D_PARAM, 0.f, 2.f, 2.f, "Range D", {"Low (5-20 min)", "Med (1s-2min)", "High (0.1-10s)"});
 
-        // Shape switches (0-3)
-        configSwitch(SHAPE_A_PARAM, 0.f, 3.f, 0.f, "Shape A", {"Lorenz", "Rössler", "Thomas", "Halvorsen"});
-        configSwitch(SHAPE_B_PARAM, 0.f, 3.f, 1.f, "Shape B", {"Lorenz", "Rössler", "Thomas", "Halvorsen"});
-        configSwitch(SHAPE_C_PARAM, 0.f, 3.f, 2.f, "Shape C", {"Lorenz", "Rössler", "Thomas", "Halvorsen"});
-        configSwitch(SHAPE_D_PARAM, 0.f, 3.f, 3.f, "Shape D", {"Lorenz", "Rössler", "Thomas", "Halvorsen"});
+        // Shape switches (0-3) - list is inverted because switch top=3, bottom=0
+        configSwitch(SHAPE_A_PARAM, 0.f, 3.f, 3.f, "Shape A", {"Halvorsen", "Thomas", "Rössler", "Lorenz"});
+        configSwitch(SHAPE_B_PARAM, 0.f, 3.f, 2.f, "Shape B", {"Halvorsen", "Thomas", "Rössler", "Lorenz"});
+        configSwitch(SHAPE_C_PARAM, 0.f, 3.f, 1.f, "Shape C", {"Halvorsen", "Thomas", "Rössler", "Lorenz"});
+        configSwitch(SHAPE_D_PARAM, 0.f, 3.f, 0.f, "Shape D", {"Halvorsen", "Thomas", "Rössler", "Lorenz"});
 
         // Voltage switches (0=±5V, 1=±10V, 2=0-5V, 3=0-10V)
         configSwitch(VOLTAGE_A_PARAM, 0.f, 3.f, 0.f, "Voltage A", {"±5V", "±10V", "0-5V", "0-10V"});
@@ -273,6 +396,7 @@ struct StrangeWeather : Module {
 
         // Trail length knob (64-4096)
         configParam(TRAIL_PARAM, 0.f, 1.f, 0.7f, "Trail Length", "", 0.f, 1.f);
+        configButton(RESET_PARAM, "Reset display and attractors");
 
         // Output labels
         configOutput(A_X_OUTPUT, "Bank A X");
@@ -349,21 +473,38 @@ struct StrangeWeather : Module {
 
         float bankOutputs[4][4]; // [bank][x,y,z,sum]
 
+        // Handle reset button (momentary)
+        if (resetTrigger.process(params[RESET_PARAM].getValue())) {
+            performReset();
+        }
+
         for (int i = 0; i < 4; i++) {
             // Get parameters
             int range = (int)params[rangeParams[i]].getValue();
             float rateKnob = params[rateParams[i]].getValue();
             int voltageMode = (int)params[voltageParams[i]].getValue();
 
-            // Set attractor type and chaos
-            attractors[i].type = (AttractorType)(int)params[shapeParams[i]].getValue();
+            // Set attractor type (resets state if changed) and chaos
+            // Switch position is inverted from value (top=0, bottom=3 visually but value-wise top=3, bottom=0)
+            // Invert: 3-value so top position = Lorenz (0), bottom = Halvorsen (3)
+            int shapeValue = 3 - (int)params[shapeParams[i]].getValue();
+            attractors[i].setType((AttractorType)shapeValue);
             attractors[i].chaos = params[chaosParams[i]].getValue();
 
             // Calculate rate
             float rate = calculateRate(range, rateKnob);
 
+            // Type-specific rate scaling (Thomas is inherently slow, needs boost)
+            float typeScale = 1.0f;
+            switch (attractors[i].type) {
+                case THOMAS: typeScale = 5.0f; break;   // Thomas is very slow
+                case ROSSLER: typeScale = 1.5f; break;  // Rossler is a bit slow
+                case LORENZ: typeScale = 1.5f; break;   // Currently running Rossler equations
+                case HALVORSEN: typeScale = 3.0f; break; // Halvorsen benefits from a faster sweep
+            }
+
             // Adaptive time step
-            float dt = rate / args.sampleRate;
+            float dt = rate * typeScale / args.sampleRate;
             const float maxDt = 0.01f;
             int steps = (int)std::ceil(dt / maxDt);
             steps = std::max(1, std::min(steps, 100));
@@ -374,14 +515,20 @@ struct StrangeWeather : Module {
             }
 
             // Get raw normalized outputs (-1 to +1)
-            float rawX = attractors[i].getNormX() / 5.0f;  // getNormX returns ±5V, convert to ±1
-            float rawY = attractors[i].getNormY() / 5.0f;
-            float rawZ = attractors[i].getNormZ() / 5.0f;
+            const float outputGain = 3.0f;  // simple boost to use the full scope range
+            float rawX = clamp(attractors[i].getNormX() / 5.0f * outputGain, -1.f, 1.f);  // getNormX returns ±5V, convert to ±1
+            float rawY = clamp(attractors[i].getNormY() / 5.0f * outputGain, -1.f, 1.f);
+            float rawZ = clamp(attractors[i].getNormZ() / 5.0f * outputGain, -1.f, 1.f);
 
             // Apply smoothing
             smoothedX[i] += smoothCoeff * (rawX - smoothedX[i]);
             smoothedY[i] += smoothCoeff * (rawY - smoothedY[i]);
             smoothedZ[i] += smoothCoeff * (rawZ - smoothedZ[i]);
+
+            // Use smoothed values for display trails to reduce jitter
+            displayX[i] = clamp(smoothedX[i], -1.f, 1.f);
+            displayY[i] = clamp(smoothedY[i], -1.f, 1.f);
+            displayZ[i] = clamp(smoothedZ[i], -1.f, 1.f);
 
             // Scale to voltage
             bankOutputs[i][0] = scaleVoltage(smoothedX[i], voltageMode);
@@ -429,27 +576,52 @@ struct StrangeWeather : Module {
         trailCounter++;
         if (trailCounter >= (int)(args.sampleRate / 60.f)) { // ~60 fps
             trailCounter = 0;
+
+            // Wait for smoothing to settle, then fill trail with current position (clear screen)
+            initDelay++;
+            if (initDelay == 30) {  // ~0.5 seconds at 60fps - enough for smoothing to settle
+                for (int j = 0; j < MAX_TRAIL_LENGTH; j++) {
+                    for (int i = 0; i < 4; i++) {
+                        trailX[i][j] = displayX[i];
+                        trailY[i][j] = displayY[i];
+                        trailZ[i][j] = displayZ[i];
+                    }
+                    // Combined
+                    float normSum = (displayX[0] + displayY[0] + displayZ[0] +
+                                    displayX[1] + displayY[1] + displayZ[1] +
+                                    displayX[2] + displayY[2] + displayZ[2] +
+                                    displayX[3] + displayY[3] + displayZ[3]) / 12.f;
+                    float normRect = (std::abs(displayX[0]) + std::abs(displayY[0]) + std::abs(displayZ[0]) +
+                                     std::abs(displayX[1]) + std::abs(displayY[1]) + std::abs(displayZ[1]) +
+                                     std::abs(displayX[2]) + std::abs(displayY[2]) + std::abs(displayZ[2]) +
+                                     std::abs(displayX[3]) + std::abs(displayY[3]) + std::abs(displayZ[3])) / 12.f;
+                    combTrailX[j] = clamp(normSum, -1.f, 1.f);
+                    combTrailY[j] = clamp(normRect * 2.f - 1.f, -1.f, 1.f);
+                    combTrailZ[j] = clamp((displayZ[0] + displayZ[1] + displayZ[2] + displayZ[3]) / 4.f, -1.f, 1.f);
+                }
+            }
+
             trailIndex = (trailIndex + 1) % MAX_TRAIL_LENGTH;
 
             // Store smoothed normalized positions for display (-1 to 1 range, clamped)
             for (int i = 0; i < 4; i++) {
-                trailX[i][trailIndex] = clamp(smoothedX[i], -1.f, 1.f);
-                trailY[i][trailIndex] = clamp(smoothedY[i], -1.f, 1.f);
-                trailZ[i][trailIndex] = clamp(smoothedZ[i], -1.f, 1.f);
+                trailX[i][trailIndex] = displayX[i];
+                trailY[i][trailIndex] = displayY[i];
+                trailZ[i][trailIndex] = displayZ[i];
             }
 
             // Combined: use sum and rectified sum as x,y,z
-            float normSum = (smoothedX[0] + smoothedY[0] + smoothedZ[0] +
-                            smoothedX[1] + smoothedY[1] + smoothedZ[1] +
-                            smoothedX[2] + smoothedY[2] + smoothedZ[2] +
-                            smoothedX[3] + smoothedY[3] + smoothedZ[3]) / 12.f;
-            float normRect = (std::abs(smoothedX[0]) + std::abs(smoothedY[0]) + std::abs(smoothedZ[0]) +
-                             std::abs(smoothedX[1]) + std::abs(smoothedY[1]) + std::abs(smoothedZ[1]) +
-                             std::abs(smoothedX[2]) + std::abs(smoothedY[2]) + std::abs(smoothedZ[2]) +
-                             std::abs(smoothedX[3]) + std::abs(smoothedY[3]) + std::abs(smoothedZ[3])) / 12.f;
+            float normSum = (displayX[0] + displayY[0] + displayZ[0] +
+                            displayX[1] + displayY[1] + displayZ[1] +
+                            displayX[2] + displayY[2] + displayZ[2] +
+                            displayX[3] + displayY[3] + displayZ[3]) / 12.f;
+            float normRect = (std::abs(displayX[0]) + std::abs(displayY[0]) + std::abs(displayZ[0]) +
+                             std::abs(displayX[1]) + std::abs(displayY[1]) + std::abs(displayZ[1]) +
+                             std::abs(displayX[2]) + std::abs(displayY[2]) + std::abs(displayZ[2]) +
+                             std::abs(displayX[3]) + std::abs(displayY[3]) + std::abs(displayZ[3])) / 12.f;
             combTrailX[trailIndex] = clamp(normSum, -1.f, 1.f);
             combTrailY[trailIndex] = clamp(normRect * 2.f - 1.f, -1.f, 1.f);
-            combTrailZ[trailIndex] = clamp((smoothedZ[0] + smoothedZ[1] + smoothedZ[2] + smoothedZ[3]) / 4.f, -1.f, 1.f);
+            combTrailZ[trailIndex] = clamp((displayZ[0] + displayZ[1] + displayZ[2] + displayZ[3]) / 4.f, -1.f, 1.f);
         }
     }
 
@@ -882,6 +1054,15 @@ struct ModeButton : app::SvgSwitch {
     }
 };
 
+// Reset button - triggers attractor/display reset
+struct ResetButton : app::SvgSwitch {
+    ResetButton() {
+        momentary = true;
+        addFrame(Svg::load(asset::system("res/ComponentLibrary/TL1105_0.svg")));
+        addFrame(Svg::load(asset::system("res/ComponentLibrary/TL1105_1.svg")));
+    }
+};
+
 // 3D toggle button - toggles 3D display mode
 struct Toggle3DButton : app::SvgSwitch {
     StrangeWeather* swModule = nullptr;
@@ -966,19 +1147,21 @@ struct PanelLabels : Widget {
         nvgFontSize(args.vg, 8);
         nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
         nvgFillColor(args.vg, nvgRGB(0x44, 0x44, 0x44));
-        nvgText(args.vg, mm2px(17.0), mm2px(82), "CYCLE", NULL);
-        nvgText(args.vg, mm2px(29.0), mm2px(82), "MODE", NULL);
-        nvgText(args.vg, mm2px(41.0), mm2px(82), "3D", NULL);
-        nvgText(args.vg, mm2px(53.0), mm2px(82), "TRAIL", NULL);
+        nvgText(args.vg, mm2px(9.0), mm2px(82), "CYCLE", NULL);
+        nvgText(args.vg, mm2px(22.0), mm2px(82), "MODE", NULL);
+        nvgText(args.vg, mm2px(35.0), mm2px(82), "3D", NULL);
+        nvgText(args.vg, mm2px(48.0), mm2px(82), "TRAIL", NULL);
+        nvgText(args.vg, mm2px(61.0), mm2px(82), "RESET", NULL);
 
         // Attractor type descriptions (under display, in line with COMBINED)
         nvgFontSize(args.vg, 7);
         nvgTextAlign(args.vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
         nvgFillColor(args.vg, nvgRGB(0x55, 0x55, 0x55));
-        nvgText(args.vg, mm2px(5), mm2px(90), "LORENZ: Smooth two-lobed butterfly", NULL);
-        nvgText(args.vg, mm2px(5), mm2px(95), "ROSSLER: Asymmetric spiral, large excursions", NULL);
-        nvgText(args.vg, mm2px(5), mm2px(100), "THOMAS: Cyclically symmetric, smooth rolling", NULL);
-        nvgText(args.vg, mm2px(5), mm2px(105), "HALVORSEN: Sculptural, sharp transitions", NULL);
+        float descX = mm2px(9.0);
+        nvgText(args.vg, descX, mm2px(90), "LORENZ: Smooth two-lobed butterfly", NULL);
+        nvgText(args.vg, descX, mm2px(95), "ROSSLER: Asymmetric spiral, large excursions", NULL);
+        nvgText(args.vg, descX, mm2px(100), "THOMAS: Cyclically symmetric, smooth rolling", NULL);
+        nvgText(args.vg, descX, mm2px(105), "HALVORSEN: Sculptural, sharp transitions", NULL);
 
         // Combined section - label under RATE column, inline with jacks
         nvgFontSize(args.vg, 10);
@@ -1027,24 +1210,26 @@ struct StrangeWeatherWidget : ModuleWidget {
 
         // Cycle button (below display, centered on 35mm with 12mm spacing)
         CycleButton* cycleBtn = new CycleButton();
-        cycleBtn->box.pos = mm2px(Vec(17.0, 77.0)).minus(cycleBtn->box.size.div(2));
+        cycleBtn->box.pos = mm2px(Vec(9.0, 77.0)).minus(cycleBtn->box.size.div(2));
         cycleBtn->swModule = module;
         addChild(cycleBtn);
 
         // Mode button (cycles display style)
         ModeButton* modeBtn = new ModeButton();
-        modeBtn->box.pos = mm2px(Vec(29.0, 77.0)).minus(modeBtn->box.size.div(2));
+        modeBtn->box.pos = mm2px(Vec(22.0, 77.0)).minus(modeBtn->box.size.div(2));
         modeBtn->swModule = module;
         addChild(modeBtn);
 
         // 3D toggle button
         Toggle3DButton* toggle3DBtn = new Toggle3DButton();
-        toggle3DBtn->box.pos = mm2px(Vec(41.0, 77.0)).minus(toggle3DBtn->box.size.div(2));
+        toggle3DBtn->box.pos = mm2px(Vec(35.0, 77.0)).minus(toggle3DBtn->box.size.div(2));
         toggle3DBtn->swModule = module;
         addChild(toggle3DBtn);
 
         // Trail length knob
-        addParam(createParamCentered<Trimpot>(mm2px(Vec(53.0, 77.0)), module, StrangeWeather::TRAIL_PARAM));
+        addParam(createParamCentered<Trimpot>(mm2px(Vec(48.0, 77.0)), module, StrangeWeather::TRAIL_PARAM));
+        // Reset button
+        addParam(createParamCentered<ResetButton>(mm2px(Vec(61.0, 77.0)), module, StrangeWeather::RESET_PARAM));
 
         // Layout: Each bank has Rate knob, Range toggle (3-pos), Shape toggle (4-pos),
         //         Voltage toggle (4-pos), Chaos knob, then 4 outputs
