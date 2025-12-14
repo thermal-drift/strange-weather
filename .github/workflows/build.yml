@@ -30,11 +30,11 @@ jobs:
             rack-os: lin
             rack-arch: x64
           - platform: macos-x64
-            os: macos-latest
+            os: macos-13
             rack-os: mac
             rack-arch: x64
           - platform: macos-arm64
-            os: macos-latest
+            os: macos-14
             rack-os: mac
             rack-arch: arm64
           - platform: windows-x64
